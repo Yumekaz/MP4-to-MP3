@@ -13,9 +13,9 @@ const PORT = process.env.PORT || 3000;
 const TEMP_DIR = path.join(__dirname, 'temp');
 const MAX_FILE_AGE_MS = 30 * 60 * 1000; // 30 minutes
 
-// RapidAPI Configuration
+// RapidAPI Configuration - Using Youtube MP3 Download API
 const RAPIDAPI_KEY = process.env.RAPIDAPI_KEY || 'f843e7c874msh85435a209eaf50fp1c599ajsncaafbe28694f';
-const RAPIDAPI_HOST = 'youtube-mp3-audio-video-downloader.p.rapidapi.com';
+const RAPIDAPI_HOST = 'youtube-mp36.p.rapidapi.com';
 
 // Authentication - single password for private use
 const AUTH_PASSWORD = process.env.AUTH_PASSWORD || 'mihir123';
@@ -121,20 +121,27 @@ function rapidApiRequest(path) {
       }
     };
 
+    console.log('Making request to:', RAPIDAPI_HOST + path);
+
     const req = https.request(options, (res) => {
       const chunks = [];
       res.on('data', (chunk) => chunks.push(chunk));
       res.on('end', () => {
         try {
           const body = Buffer.concat(chunks).toString();
+          console.log('API Response:', body.substring(0, 500));
           resolve(JSON.parse(body));
         } catch (e) {
-          reject(new Error('Failed to parse API response'));
+          reject(new Error('Failed to parse API response: ' + e.message));
         }
       });
     });
 
     req.on('error', reject);
+    req.setTimeout(60000, () => {
+      req.destroy();
+      reject(new Error('Request timeout'));
+    });
     req.end();
   });
 }
@@ -158,13 +165,18 @@ function downloadFile(url, destPath) {
   return new Promise((resolve, reject) => {
     const file = require('fs').createWriteStream(destPath);
 
-    const makeRequest = (downloadUrl) => {
+    const makeRequest = (downloadUrl, redirectCount = 0) => {
+      if (redirectCount > 5) {
+        reject(new Error('Too many redirects'));
+        return;
+      }
+
       const protocol = downloadUrl.startsWith('https') ? https : require('http');
 
       protocol.get(downloadUrl, (response) => {
         // Handle redirects
         if (response.statusCode >= 300 && response.statusCode < 400 && response.headers.location) {
-          makeRequest(response.headers.location);
+          makeRequest(response.headers.location, redirectCount + 1);
           return;
         }
 
@@ -208,19 +220,19 @@ app.get('/api/info', async (req, res) => {
   try {
     console.log('Getting video info for:', videoId);
 
-    // Get video details from RapidAPI
-    const result = await rapidApiRequest(`/video_details?id=${videoId}`);
+    // Get video details from RapidAPI - using dl endpoint which returns info too
+    const result = await rapidApiRequest(`/dl?id=${videoId}`);
 
-    if (result.error || !result.title) {
+    if (result.status === 'fail' || result.error) {
       console.error('API Error:', result);
-      return res.status(400).json({ error: 'Could not fetch video info. Please try a different video.' });
+      return res.status(400).json({ error: result.msg || 'Could not fetch video info' });
     }
 
     res.json({
       title: result.title || 'Unknown Title',
-      author: result.channel?.name || result.author || 'Unknown Artist',
-      duration: result.duration || result.lengthSeconds || 0,
-      thumbnail: result.thumbnail?.[0]?.url || result.thumbnails?.[0]?.url || ''
+      author: result.author || result.channel || 'Unknown Artist',
+      duration: result.duration || 0,
+      thumbnail: `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`
     });
   } catch (error) {
     console.error('Info error:', error);
@@ -234,7 +246,7 @@ app.get('/api/convert', async (req, res) => {
     return res.status(401).json({ error: 'Unauthorized' });
   }
 
-  const { url, quality = '128' } = req.query;
+  const { url } = req.query;
 
   if (!url || !validator.isURL(url, { protocols: ['http', 'https'], require_protocol: true })) {
     return res.status(400).json({ error: 'Invalid YouTube URL' });
@@ -248,42 +260,25 @@ app.get('/api/convert', async (req, res) => {
   try {
     console.log('Converting video:', videoId);
 
-    // Step 1: Get download link from RapidAPI
-    const result = await rapidApiRequest(`/download?id=${videoId}&format=mp3&quality=${quality}kbps`);
+    // Get download link from RapidAPI - youtube-mp36 API
+    const result = await rapidApiRequest(`/dl?id=${videoId}`);
 
-    console.log('API Response:', JSON.stringify(result).substring(0, 500));
+    console.log('Full API Response:', JSON.stringify(result).substring(0, 1000));
 
-    // Check for different response formats
-    let downloadUrl = null;
-    let title = 'audio';
-
-    if (result.link) {
-      downloadUrl = result.link;
-      title = result.title || 'audio';
-    } else if (result.url) {
-      downloadUrl = result.url;
-      title = result.title || 'audio';
-    } else if (result.downloadUrl) {
-      downloadUrl = result.downloadUrl;
-      title = result.title || 'audio';
-    } else if (result.audio) {
-      // Some APIs return audio in a nested object
-      downloadUrl = result.audio.url || result.audio.link;
-      title = result.title || 'audio';
-    } else if (result.formats) {
-      // Find audio format
-      const audioFormat = result.formats.find(f => f.mimeType?.includes('audio') || f.format === 'mp3');
-      if (audioFormat) {
-        downloadUrl = audioFormat.url || audioFormat.link;
-        title = result.title || 'audio';
-      }
+    if (result.status === 'fail') {
+      return res.status(400).json({
+        error: result.msg || 'Conversion failed. The video might be restricted.',
+      });
     }
 
+    // Check for download link
+    let downloadUrl = result.link;
+    let title = result.title || 'audio';
+
     if (!downloadUrl) {
-      console.error('No download URL found in response:', result);
+      console.error('No download URL in response:', result);
       return res.status(400).json({
-        error: 'Could not get download link. The video might be restricted or unavailable.',
-        details: result.error || result.message || 'Unknown error'
+        error: 'Could not get download link. Please try a different video.',
       });
     }
 
@@ -294,10 +289,10 @@ app.get('/api/convert', async (req, res) => {
 
     console.log('Downloading from:', downloadUrl.substring(0, 100) + '...');
 
-    // Step 2: Download the file
+    // Download the file
     await downloadFile(downloadUrl, tempPath);
 
-    // Step 3: Send to client
+    // Send to client
     const stats = await fs.stat(tempPath);
 
     res.setHeader('Content-Type', 'audio/mpeg');
@@ -309,7 +304,6 @@ app.get('/api/convert', async (req, res) => {
     readStream.pipe(res);
 
     readStream.on('close', async () => {
-      // Clean up temp file after download
       try {
         await fs.unlink(tempPath);
       } catch (e) {
@@ -403,7 +397,7 @@ app.get('/', (req, res) => {
       margin-bottom: 8px;
     }
     
-    input[type="text"], input[type="password"], select {
+    input[type="text"], input[type="password"] {
       width: 100%;
       padding: 14px 16px;
       border: 2px solid #e5e7eb;
@@ -412,7 +406,7 @@ app.get('/', (req, res) => {
       transition: all 0.2s;
     }
     
-    input:focus, select:focus {
+    input:focus {
       outline: none;
       border-color: #667eea;
       box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
@@ -571,15 +565,6 @@ app.get('/', (req, res) => {
         </div>
       </div>
       
-      <div class="form-group">
-        <label for="quality">Audio Quality</label>
-        <select id="quality">
-          <option value="128">128 kbps (Standard)</option>
-          <option value="192">192 kbps (High)</option>
-          <option value="320">320 kbps (Best)</option>
-        </select>
-      </div>
-      
       <div class="loading" id="loading">
         <div class="spinner"></div>
         <p>Converting... Please wait</p>
@@ -666,7 +651,6 @@ app.get('/', (req, res) => {
     
     async function convert() {
       const url = document.getElementById('url').value.trim();
-      const quality = document.getElementById('quality').value;
       const errorEl = document.getElementById('error');
       const successEl = document.getElementById('success');
       const loadingEl = document.getElementById('loading');
@@ -684,7 +668,7 @@ app.get('/', (req, res) => {
       convertBtn.disabled = true;
       
       try {
-        const downloadUrl = '/api/convert?url=' + encodeURIComponent(url) + '&quality=' + quality + '&sessionId=' + sessionId;
+        const downloadUrl = '/api/convert?url=' + encodeURIComponent(url) + '&sessionId=' + sessionId;
         
         const response = await fetch(downloadUrl);
         
@@ -746,6 +730,6 @@ app.get('/health', (req, res) => {
 
 // Start server
 app.listen(PORT, () => {
-  console.log(\`Server running on port \${PORT}\`);
-  console.log(\`Visit http://localhost:\${PORT} to use the converter\`);
+  console.log(`Server running on port ${PORT}`);
+  console.log(`Visit http://localhost:${PORT} to use the converter`);
 });
