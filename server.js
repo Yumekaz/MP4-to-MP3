@@ -207,6 +207,8 @@ app.post('/api/convert', async (req, res) => {
 
   } catch (error) {
     console.error('Conversion error:', error.message);
+    console.error('Full error:', error);
+    if (error.stderr) console.error('stderr:', error.stderr);
 
     try {
       if (tempVideoPath) await fs.unlink(tempVideoPath).catch(() => { });
