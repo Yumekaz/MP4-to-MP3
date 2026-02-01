@@ -22,12 +22,6 @@ if (!RAPIDAPI_KEY) {
   console.error('Set it in Render Dashboard > Environment or in .env file locally');
 }
 
-// Authentication - single password for private use
-const AUTH_PASSWORD = process.env.AUTH_PASSWORD || 'mihir123';
-
-// Store authenticated sessions (in production, use Redis or similar)
-const sessions = new Map();
-
 // Ensure temp directory exists
 async function ensureTempDir() {
   try {
@@ -55,9 +49,9 @@ async function cleanupOldFiles() {
     console.error('Cleanup error:', error.message);
   }
 }
-setInterval(cleanupOldFiles, 10 * 60 * 1000); // Run every 10 minutes
+setInterval(cleanupOldFiles, 10 * 60 * 1000);
 
-// Security middleware with relaxed CSP for our needs
+// Security middleware
 app.use(helmet({
   contentSecurityPolicy: {
     directives: {
@@ -71,7 +65,6 @@ app.use(helmet({
 }));
 
 app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
 
 // Rate limiting
 const limiter = rateLimit({
@@ -80,37 +73,6 @@ const limiter = rateLimit({
   message: { error: 'Too many requests, please try again later.' }
 });
 app.use('/api/', limiter);
-
-// Session middleware
-function generateSessionId() {
-  return Math.random().toString(36).substring(2) + Date.now().toString(36);
-}
-
-function isAuthenticated(req) {
-  const sessionId = req.headers['x-session-id'] || req.query.sessionId;
-  return sessions.has(sessionId);
-}
-
-// Authentication endpoint
-app.post('/api/auth', (req, res) => {
-  const { password } = req.body;
-
-  if (password === AUTH_PASSWORD) {
-    const sessionId = generateSessionId();
-    sessions.set(sessionId, { createdAt: Date.now() });
-
-    // Clean up old sessions
-    for (const [sid, data] of sessions) {
-      if (Date.now() - data.createdAt > 24 * 60 * 60 * 1000) {
-        sessions.delete(sid);
-      }
-    }
-
-    res.json({ success: true, sessionId });
-  } else {
-    res.status(401).json({ error: 'Invalid password' });
-  }
-});
 
 // Helper function to make RapidAPI requests
 function rapidApiRequest(path) {
@@ -179,7 +141,6 @@ function downloadFile(url, destPath) {
       const protocol = downloadUrl.startsWith('https') ? https : require('http');
 
       protocol.get(downloadUrl, (response) => {
-        // Handle redirects
         if (response.statusCode >= 300 && response.statusCode < 400 && response.headers.location) {
           makeRequest(response.headers.location, redirectCount + 1);
           return;
@@ -207,10 +168,6 @@ function downloadFile(url, destPath) {
 
 // API endpoint to get video info
 app.get('/api/info', async (req, res) => {
-  if (!isAuthenticated(req)) {
-    return res.status(401).json({ error: 'Unauthorized' });
-  }
-
   const { url } = req.query;
 
   if (!url) {
@@ -224,12 +181,9 @@ app.get('/api/info', async (req, res) => {
 
   try {
     console.log('Getting video info for:', videoId);
-
-    // Get video details from RapidAPI - using dl endpoint which returns info too
     const result = await rapidApiRequest(`/dl?id=${videoId}`);
 
     if (result.status === 'fail' || result.error) {
-      console.error('API Error:', result);
       return res.status(400).json({ error: result.msg || 'Could not fetch video info' });
     }
 
@@ -247,10 +201,6 @@ app.get('/api/info', async (req, res) => {
 
 // API endpoint to convert and download
 app.get('/api/convert', async (req, res) => {
-  if (!isAuthenticated(req)) {
-    return res.status(401).json({ error: 'Unauthorized' });
-  }
-
   const { url } = req.query;
 
   if (!url || !validator.isURL(url, { protocols: ['http', 'https'], require_protocol: true })) {
@@ -264,40 +214,25 @@ app.get('/api/convert', async (req, res) => {
 
   try {
     console.log('Converting video:', videoId);
-
-    // Get download link from RapidAPI - youtube-mp36 API
     const result = await rapidApiRequest(`/dl?id=${videoId}`);
 
-    console.log('Full API Response:', JSON.stringify(result).substring(0, 1000));
-
     if (result.status === 'fail') {
-      return res.status(400).json({
-        error: result.msg || 'Conversion failed. The video might be restricted.',
-      });
+      return res.status(400).json({ error: result.msg || 'Conversion failed' });
     }
 
-    // Check for download link
     let downloadUrl = result.link;
     let title = result.title || 'audio';
 
     if (!downloadUrl) {
-      console.error('No download URL in response:', result);
-      return res.status(400).json({
-        error: 'Could not get download link. Please try a different video.',
-      });
+      return res.status(400).json({ error: 'Could not get download link' });
     }
 
-    // Sanitize filename
     const safeTitle = sanitize(title).substring(0, 100) || 'audio';
     const filename = `${safeTitle}.mp3`;
     const tempPath = path.join(TEMP_DIR, `${Date.now()}-${Math.random().toString(36).substring(7)}.mp3`);
 
-    console.log('Downloading from:', downloadUrl.substring(0, 100) + '...');
-
-    // Download the file
     await downloadFile(downloadUrl, tempPath);
 
-    // Send to client
     const stats = await fs.stat(tempPath);
 
     res.setHeader('Content-Type', 'audio/mpeg');
@@ -305,34 +240,19 @@ app.get('/api/convert', async (req, res) => {
     res.setHeader('Content-Length', stats.size);
 
     const readStream = require('fs').createReadStream(tempPath);
-
     readStream.pipe(res);
 
     readStream.on('close', async () => {
-      try {
-        await fs.unlink(tempPath);
-      } catch (e) {
-        console.error('Cleanup error:', e.message);
-      }
-    });
-
-    readStream.on('error', (err) => {
-      console.error('Stream error:', err);
-      if (!res.headersSent) {
-        res.status(500).json({ error: 'Download failed' });
-      }
+      try { await fs.unlink(tempPath); } catch (e) { }
     });
 
   } catch (error) {
     console.error('Conversion error:', error.message);
-    res.status(500).json({
-      error: 'Conversion failed. Please try again.',
-      details: error.message
-    });
+    res.status(500).json({ error: 'Conversion failed. Please try again.' });
   }
 });
 
-// Serve static frontend
+// Serve static frontend - NO LOGIN REQUIRED
 app.get('/', (req, res) => {
   res.send(`
 <!DOCTYPE html>
@@ -343,11 +263,7 @@ app.get('/', (req, res) => {
   <title>YouTube to MP3 Converter</title>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
   <style>
-    * {
-      margin: 0;
-      padding: 0;
-      box-sizing: border-box;
-    }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
     
     body {
       font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
@@ -382,17 +298,7 @@ app.get('/', (req, res) => {
       margin-bottom: 32px;
     }
     
-    .login-form, .converter-form {
-      display: none;
-    }
-    
-    .login-form.active, .converter-form.active {
-      display: block;
-    }
-    
-    .form-group {
-      margin-bottom: 20px;
-    }
+    .form-group { margin-bottom: 20px; }
     
     label {
       display: block;
@@ -402,7 +308,7 @@ app.get('/', (req, res) => {
       margin-bottom: 8px;
     }
     
-    input[type="text"], input[type="password"] {
+    input[type="text"] {
       width: 100%;
       padding: 14px 16px;
       border: 2px solid #e5e7eb;
@@ -473,14 +379,9 @@ app.get('/', (req, res) => {
       overflow: hidden;
     }
     
-    .video-meta p {
-      font-size: 12px;
-      color: #666;
-    }
+    .video-meta p { font-size: 12px; color: #666; }
     
-    .error {
-      background: #fee2e2;
-      color: #dc2626;
+    .error, .success {
       padding: 12px 16px;
       border-radius: 8px;
       margin-bottom: 16px;
@@ -488,23 +389,9 @@ app.get('/', (req, res) => {
       display: none;
     }
     
-    .error.show {
-      display: block;
-    }
-    
-    .success {
-      background: #d1fae5;
-      color: #059669;
-      padding: 12px 16px;
-      border-radius: 8px;
-      margin-bottom: 16px;
-      font-size: 14px;
-      display: none;
-    }
-    
-    .success.show {
-      display: block;
-    }
+    .error { background: #fee2e2; color: #dc2626; }
+    .success { background: #d1fae5; color: #059669; }
+    .error.show, .success.show { display: block; }
     
     .loading {
       display: none;
@@ -512,9 +399,7 @@ app.get('/', (req, res) => {
       padding: 20px;
     }
     
-    .loading.show {
-      display: block;
-    }
+    .loading.show { display: block; }
     
     .spinner {
       width: 40px;
@@ -526,9 +411,7 @@ app.get('/', (req, res) => {
       margin: 0 auto 12px;
     }
     
-    @keyframes spin {
-      to { transform: rotate(360deg); }
-    }
+    @keyframes spin { to { transform: rotate(360deg); } }
     
     .footer {
       text-align: center;
@@ -546,99 +429,49 @@ app.get('/', (req, res) => {
     <div class="error" id="error"></div>
     <div class="success" id="success"></div>
     
-    <!-- Login Form -->
-    <div class="login-form active" id="loginForm">
-      <div class="form-group">
-        <label for="password">Password</label>
-        <input type="password" id="password" placeholder="Enter access password">
-      </div>
-      <button type="button" id="loginBtn">Access Converter</button>
+    <div class="form-group">
+      <label for="url">YouTube URL</label>
+      <input type="text" id="url" placeholder="https://youtube.com/watch?v=...">
     </div>
     
-    <!-- Converter Form -->
-    <div class="converter-form" id="converterForm">
-      <div class="form-group">
-        <label for="url">YouTube URL</label>
-        <input type="text" id="url" placeholder="https://youtube.com/watch?v=...">
+    <div class="video-info" id="videoInfo">
+      <img id="thumbnail" src="" alt="Video thumbnail">
+      <div class="video-meta">
+        <h3 id="videoTitle"></h3>
+        <p id="videoAuthor"></p>
       </div>
-      
-      <div class="video-info" id="videoInfo">
-        <img id="thumbnail" src="" alt="Video thumbnail">
-        <div class="video-meta">
-          <h3 id="videoTitle"></h3>
-          <p id="videoAuthor"></p>
-        </div>
-      </div>
-      
-      <div class="loading" id="loading">
-        <div class="spinner"></div>
-        <p>Converting... Please wait</p>
-      </div>
-      
-      <button type="button" id="convertBtn">Convert to MP3</button>
-      
-      <div class="footer">
-        <p>For personal use only</p>
-      </div>
+    </div>
+    
+    <div class="loading" id="loading">
+      <div class="spinner"></div>
+      <p>Converting... Please wait</p>
+    </div>
+    
+    <button type="button" id="convertBtn">Convert to MP3</button>
+    
+    <div class="footer">
+      <p>For personal use only</p>
     </div>
   </div>
   
   <script>
-    let sessionId = localStorage.getItem('sessionId');
-    
-    // Check if already logged in
-    if (sessionId) {
-      document.getElementById('loginForm').classList.remove('active');
-      document.getElementById('converterForm').classList.add('active');
-    }
-    
-    // Auto-fetch video info when URL changes
     let debounceTimer;
     document.getElementById('url').addEventListener('input', function() {
       clearTimeout(debounceTimer);
       debounceTimer = setTimeout(fetchVideoInfo, 500);
     });
     
-    async function login() {
-      const password = document.getElementById('password').value;
-      const errorEl = document.getElementById('error');
-      
-      try {
-        const res = await fetch('/api/auth', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ password })
-        });
-        
-        const data = await res.json();
-        
-        if (data.success) {
-          sessionId = data.sessionId;
-          localStorage.setItem('sessionId', sessionId);
-          document.getElementById('loginForm').classList.remove('active');
-          document.getElementById('converterForm').classList.add('active');
-          errorEl.classList.remove('show');
-        } else {
-          errorEl.textContent = data.error || 'Login failed';
-          errorEl.classList.add('show');
-        }
-      } catch (err) {
-        errorEl.textContent = 'Connection error. Please try again.';
-        errorEl.classList.add('show');
-      }
-    }
-    
     async function fetchVideoInfo() {
       const url = document.getElementById('url').value.trim();
       const videoInfoEl = document.getElementById('videoInfo');
       
-      if (!url || !url.includes('youtube') && !url.includes('youtu.be')) {
+      if (!url || (!url.includes('youtube') && !url.includes('youtu.be'))) {
         videoInfoEl.classList.remove('show');
         return;
       }
       
       try {
-        const res = await fetch('/api/info?url=' + encodeURIComponent(url) + '&sessionId=' + sessionId);
+        const res = await fetch('/api/info?url=' + encodeURIComponent(url));
         const data = await res.json();
         
         if (data.title) {
@@ -673,23 +506,18 @@ app.get('/', (req, res) => {
       convertBtn.disabled = true;
       
       try {
-        const downloadUrl = '/api/convert?url=' + encodeURIComponent(url) + '&sessionId=' + sessionId;
-        
-        const response = await fetch(downloadUrl);
+        const response = await fetch('/api/convert?url=' + encodeURIComponent(url));
         
         if (!response.ok) {
           const data = await response.json();
           throw new Error(data.error || 'Conversion failed');
         }
         
-        // Get filename from Content-Disposition or use default
         const disposition = response.headers.get('Content-Disposition');
         let filename = 'audio.mp3';
         if (disposition) {
           const match = disposition.match(/filename\\*?=['"]?(?:UTF-8'')?([^;'"]+)/i);
-          if (match) {
-            filename = decodeURIComponent(match[1]);
-          }
+          if (match) filename = decodeURIComponent(match[1]);
         }
         
         const blob = await response.blob();
@@ -713,20 +541,8 @@ app.get('/', (req, res) => {
       }
     }
     
-    // Handle Enter key in password field
-    document.getElementById('password').addEventListener('keypress', function(e) {
-      if (e.key === 'Enter') login();
-    });
-    
-    // Handle Enter key in URL field
     document.getElementById('url').addEventListener('keypress', function(e) {
       if (e.key === 'Enter') convert();
-    });
-    
-    // Handle button clicks
-    document.getElementById('loginBtn').addEventListener('click', function(e) {
-      e.preventDefault();
-      login();
     });
     
     document.getElementById('convertBtn').addEventListener('click', function(e) {
