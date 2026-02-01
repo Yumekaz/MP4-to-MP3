@@ -13,9 +13,14 @@ const PORT = process.env.PORT || 3000;
 const TEMP_DIR = path.join(__dirname, 'temp');
 const MAX_FILE_AGE_MS = 30 * 60 * 1000; // 30 minutes
 
-// RapidAPI Configuration - Using Youtube MP3 Download API
-const RAPIDAPI_KEY = process.env.RAPIDAPI_KEY || 'f843e7c874msh85435a209eaf50fp1c599ajsncaafbe28694f';
+// RapidAPI Configuration - MUST be set via environment variable
+const RAPIDAPI_KEY = process.env.RAPIDAPI_KEY;
 const RAPIDAPI_HOST = 'youtube-mp36.p.rapidapi.com';
+
+if (!RAPIDAPI_KEY) {
+  console.error('ERROR: RAPIDAPI_KEY environment variable is required!');
+  console.error('Set it in Render Dashboard > Environment or in .env file locally');
+}
 
 // Authentication - single password for private use
 const AUTH_PASSWORD = process.env.AUTH_PASSWORD || 'mihir123';
