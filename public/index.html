@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <title>YouTube to MP3</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <!-- Main App Screen -->
+  <div id="appScreen" class="screen">
+    <div class="container">
+      <header>
+        <div class="header-flex">
+          <div>
+            <h1>🎵 YouTube to MP3</h1>
+            <p class="subtitle">Convert videos to audio</p>
+          </div>
+        </div>
+      </header>
+
+      <main>
+        <div class="disclaimer">
+          <strong>⚖️ Legal Notice:</strong> For personal, lawful use only. 
+          Respect copyright laws and creators' rights.
+        </div>
+
+        <form id="convertForm">
+          <div class="input-group">
+            <label for="youtubeUrl">YouTube URL:</label>
+            <input 
+              type="url" 
+              id="youtubeUrl" 
+              name="youtubeUrl" 
+              placeholder="Paste YouTube link here..."
+              required
+              autocomplete="off"
+              spellcheck="false"
+              inputmode="url"
+            >
+          </div>
+
+          <button type="submit" id="convertBtn" class="primary-btn">
+            <span id="btnText">Convert to MP3</span>
+            <span id="btnSpinner" class="spinner" style="display: none;">⏳</span>
+          </button>
+        </form>
+
+        <div id="statusMessage" class="status-message" style="display: none;"></div>
+
+        <div class="info-section">
+          <h3>How to use:</h3>
+          <ol>
+            <li>Open YouTube and find a video</li>
+            <li>Tap Share → Copy link</li>
+            <li>Paste the link above</li>
+            <li>Tap "Convert to MP3"</li>
+            <li>Wait 30-60 seconds</li>
+            <li>Download will start automatically</li>
+          </ol>
+        </div>
+      </main>
+
+      <footer>
+        <p>🎶 Free to use • No tracking</p>
+        <p class="small">Limit: 20 conversions per hour</p>
+      </footer>
+    </div>
+  </div>
+
+  <script>
+    // ============================================
+    // DOM ELEMENTS
+    // ============================================
+    
+    const convertForm = document.getElementById('convertForm');
+    const urlInput = document.getElementById('youtubeUrl');
+    const convertBtn = document.getElementById('convertBtn');
+    const btnText = document.getElementById('btnText');
+    const btnSpinner = document.getElementById('btnSpinner');
+    const statusMessage = document.getElementById('statusMessage');
+
+    // ============================================
+    // UTILITY FUNCTIONS
+    // ============================================
+    
+    function showStatus(message, type = 'info') {
+      statusMessage.textContent = message;
+      statusMessage.className = `status-message ${type}`;
+      statusMessage.style.display = 'block';
+    }
+
+    function hideStatus() {
+      statusMessage.style.display = 'none';
+    }
+
+    function setConvertLoading(isLoading) {
+      convertBtn.disabled = isLoading;
+      urlInput.disabled = isLoading;
+      btnText.style.display = isLoading ? 'none' : 'inline';
+      btnSpinner.style.display = isLoading ? 'inline' : 'none';
+    }
+
+    // ============================================
+    // CONVERSION
+    // ============================================
+    
+    convertForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      hideStatus();
+
+      const url = urlInput.value.trim();
+
+      if (!url) {
+        showStatus('Please paste a YouTube URL', 'error');
+        return;
+      }
+
+      if (!url.includes('youtube.com') && !url.includes('youtu.be')) {
+        showStatus('Please enter a valid YouTube URL', 'error');
+        return;
+      }
+
+      setConvertLoading(true);
+      showStatus('⏳ Fetching audio... This may take 30-60 seconds', 'info');
+
+      try {
+        const response = await fetch('/api/convert', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ url })
+        });
+
+        if (!response.ok) {
+          const errorData = await response.json();
+          throw new Error(errorData.error || 'Conversion failed');
+        }
+
+        showStatus('✅ Converting to MP3...', 'success');
+        
+        const blob = await response.blob();
+        const downloadUrl = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = downloadUrl;
+        a.download = 'audio.mp3';
+        document.body.appendChild(a);
+        a.click();
+        window.URL.revokeObjectURL(downloadUrl);
+        document.body.removeChild(a);
+
+        showStatus('✅ Download complete! Check your downloads.', 'success');
+        urlInput.value = '';
+
+      } catch (error) {
+        console.error('Error:', error);
+        showStatus(`❌ ${error.message}`, 'error');
+      } finally {
+        setConvertLoading(false);
+      }
+    });
+
+    urlInput.addEventListener('focus', hideStatus);
+  </script>
+</body>
+</html>

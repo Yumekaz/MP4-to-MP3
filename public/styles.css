@@ -1,0 +1,317 @@
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+  -webkit-tap-highlight-color: transparent;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 
+               'Helvetica Neue', Arial, sans-serif;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  min-height: 100vh;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  padding: 16px;
+  color: #333;
+  overflow-x: hidden;
+}
+
+.screen {
+  width: 100%;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+.container {
+  background: white;
+  border-radius: 20px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+  max-width: 500px;
+  width: 100%;
+  padding: 32px 24px;
+}
+
+header {
+  text-align: center;
+  margin-bottom: 28px;
+}
+
+.header-flex {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+h1 {
+  font-size: 2rem;
+  color: #667eea;
+  margin-bottom: 6px;
+  line-height: 1.2;
+}
+
+.subtitle {
+  color: #666;
+  font-size: 0.95rem;
+}
+
+.disclaimer {
+  background: #fff3cd;
+  border: 2px solid #ffc107;
+  border-radius: 12px;
+  padding: 14px;
+  margin-bottom: 24px;
+  font-size: 0.9rem;
+  line-height: 1.5;
+}
+
+.disclaimer strong {
+  color: #856404;
+  display: block;
+  margin-bottom: 4px;
+}
+
+.input-group {
+  margin-bottom: 20px;
+}
+
+label {
+  display: block;
+  font-weight: 600;
+  margin-bottom: 8px;
+  font-size: 1rem;
+  color: #333;
+}
+
+input[type="text"],
+input[type="url"],
+input[type="password"] {
+  width: 100%;
+  padding: 16px;
+  font-size: 16px; /* Prevents zoom on iOS */
+  border: 2px solid #ddd;
+  border-radius: 12px;
+  transition: border-color 0.3s;
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+input[type="text"]:focus,
+input[type="url"]:focus,
+input[type="password"]:focus {
+  outline: none;
+  border-color: #667eea;
+}
+
+.primary-btn {
+  width: 100%;
+  padding: 18px;
+  font-size: 1.2rem;
+  font-weight: 600;
+  color: white;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  border: none;
+  border-radius: 12px;
+  cursor: pointer;
+  transition: transform 0.2s, box-shadow 0.2s;
+  -webkit-appearance: none;
+  appearance: none;
+  min-height: 56px; /* Better touch target */
+}
+
+.primary-btn:active {
+  transform: scale(0.98);
+}
+
+.primary-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.logout-btn {
+  background: #f8f9fa;
+  border: 2px solid #dee2e6;
+  border-radius: 10px;
+  width: 44px;
+  height: 44px;
+  font-size: 1.2rem;
+  cursor: pointer;
+  transition: background 0.2s;
+  flex-shrink: 0;
+}
+
+.logout-btn:active {
+  background: #e9ecef;
+}
+
+.spinner {
+  font-size: 1.3rem;
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.status-message {
+  margin: 20px 0;
+  padding: 14px;
+  border-radius: 12px;
+  font-weight: 500;
+  font-size: 0.95rem;
+  text-align: center;
+  line-height: 1.4;
+}
+
+.status-message.info {
+  background: #cfe2ff;
+  border: 2px solid #0d6efd;
+  color: #084298;
+}
+
+.status-message.success {
+  background: #d1e7dd;
+  border: 2px solid #198754;
+  color: #0f5132;
+}
+
+.status-message.error {
+  background: #f8d7da;
+  border: 2px solid #dc3545;
+  color: #842029;
+}
+
+.info-section {
+  margin-top: 32px;
+  padding-top: 24px;
+  border-top: 2px solid #eee;
+}
+
+.info-section h3 {
+  color: #667eea;
+  margin-bottom: 14px;
+  font-size: 1.15rem;
+}
+
+ol {
+  margin-left: 20px;
+  line-height: 1.7;
+  font-size: 0.95rem;
+}
+
+li {
+  margin-bottom: 8px;
+}
+
+footer {
+  margin-top: 32px;
+  text-align: center;
+  color: #666;
+  font-size: 0.9rem;
+}
+
+.small {
+  font-size: 0.8rem;
+  margin-top: 6px;
+  opacity: 0.8;
+}
+
+/* Mobile optimizations */
+@media (max-width: 640px) {
+  body {
+    padding: 12px;
+  }
+
+  .container {
+    padding: 24px 20px;
+    border-radius: 16px;
+  }
+
+  h1 {
+    font-size: 1.75rem;
+  }
+
+  .subtitle {
+    font-size: 0.9rem;
+  }
+
+  input[type="text"],
+  input[type="url"],
+  input[type="password"] {
+    font-size: 16px; /* Prevents iOS zoom */
+  }
+
+  .primary-btn {
+    font-size: 1.1rem;
+    padding: 16px;
+  }
+
+  .info-section h3 {
+    font-size: 1.05rem;
+  }
+
+  ol {
+    font-size: 0.9rem;
+  }
+}
+
+/* Landscape mobile */
+@media (max-height: 600px) and (orientation: landscape) {
+  .container {
+    padding: 20px;
+  }
+
+  h1 {
+    font-size: 1.5rem;
+    margin-bottom: 4px;
+  }
+
+  .info-section {
+    margin-top: 20px;
+  }
+}
+
+/* Dark mode support (optional) */
+@media (prefers-color-scheme: dark) {
+  /* Keep light theme for better compatibility */
+}
+
+/* Accessibility */
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation: none !important;
+    transition: none !important;
+  }
+}
+
+/* iOS specific fixes */
+input[type="text"],
+input[type="url"],
+input[type="password"],
+button {
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  appearance: none;
+}
+
+/* Prevent text size adjustment on iOS */
+html {
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
+/* Better touch feedback */
+@media (hover: none) {
+  .primary-btn:hover {
+    transform: none;
+    box-shadow: none;
+  }
+  
+  .primary-btn:active {
+    transform: scale(0.98);
+  }
+}

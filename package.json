@@ -1,0 +1,25 @@
+{
+  "name": "youtube-mp3-render",
+  "version": "1.0.0",
+  "description": "Private YouTube to MP3 converter deployed on Render",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "build": "echo 'No build step needed'"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "express-rate-limit": "^7.1.5",
+    "helmet": "^7.1.0",
+    "validator": "^13.11.0",
+    "yt-dlp-wrap": "^2.3.12",
+    "fluent-ffmpeg": "^2.1.2",
+    "dotenv": "^16.3.1",
+    "sanitize-filename": "^1.6.3",
+    "bcryptjs": "^2.4.3",
+    "express-session": "^1.18.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
