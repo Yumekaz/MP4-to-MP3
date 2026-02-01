@@ -547,7 +547,7 @@ app.get('/', (req, res) => {
         <label for="password">Password</label>
         <input type="password" id="password" placeholder="Enter access password">
       </div>
-      <button onclick="login()">Access Converter</button>
+      <button type="button" id="loginBtn">Access Converter</button>
     </div>
     
     <!-- Converter Form -->
@@ -570,7 +570,7 @@ app.get('/', (req, res) => {
         <p>Converting... Please wait</p>
       </div>
       
-      <button onclick="convert()" id="convertBtn">Convert to MP3</button>
+      <button type="button" id="convertBtn">Convert to MP3</button>
       
       <div class="footer">
         <p>For personal use only</p>
@@ -716,6 +716,17 @@ app.get('/', (req, res) => {
     // Handle Enter key in URL field
     document.getElementById('url').addEventListener('keypress', function(e) {
       if (e.key === 'Enter') convert();
+    });
+    
+    // Handle button clicks
+    document.getElementById('loginBtn').addEventListener('click', function(e) {
+      e.preventDefault();
+      login();
+    });
+    
+    document.getElementById('convertBtn').addEventListener('click', function(e) {
+      e.preventDefault();
+      convert();
     });
   </script>
 </body>
