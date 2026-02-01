@@ -109,18 +109,14 @@ async function getCobaltDownloadUrl(youtubeUrl) {
   return new Promise((resolve, reject) => {
     const postData = JSON.stringify({
       url: youtubeUrl,
-      vCodec: "h264",
-      vQuality: "720",
-      aFormat: "mp3",
-      filenamePattern: "basic",
-      isAudioOnly: true,
-      disableMetadata: false
+      downloadMode: "audio",
+      audioFormat: "mp3"
     });
 
     const options = {
       hostname: 'api.cobalt.tools',
       port: 443,
-      path: '/api/json',
+      path: '/',
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -142,11 +138,17 @@ async function getCobaltDownloadUrl(youtubeUrl) {
           console.log('Cobalt response:', result);
 
           if (result.status === 'error') {
-            reject(new Error(result.text || 'Cobalt API error'));
-          } else if (result.status === 'redirect' || result.status === 'stream') {
+            reject(new Error(result.error?.code || result.text || 'Cobalt API error'));
+          } else if (result.status === 'tunnel' || result.status === 'redirect') {
             resolve({
               url: result.url,
               filename: result.filename || 'audio.mp3'
+            });
+          } else if (result.status === 'picker' && result.picker && result.picker.length > 0) {
+            // If multiple options, pick the first audio one
+            resolve({
+              url: result.picker[0].url,
+              filename: 'audio.mp3'
             });
           } else if (result.url) {
             resolve({
@@ -154,9 +156,11 @@ async function getCobaltDownloadUrl(youtubeUrl) {
               filename: result.filename || 'audio.mp3'
             });
           } else {
-            reject(new Error('Unexpected response from Cobalt API'));
+            console.error('Unexpected Cobalt response:', result);
+            reject(new Error('Unexpected response from Cobalt API: ' + result.status));
           }
         } catch (e) {
+          console.error('Parse error:', e, 'Data:', data);
           reject(new Error('Failed to parse Cobalt response'));
         }
       });
