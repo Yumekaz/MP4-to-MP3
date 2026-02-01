@@ -3,27 +3,19 @@ const express = require('express');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
 const validator = require('validator');
-const YTDlpWrap = require('yt-dlp-wrap').default;
-const ffmpeg = require('fluent-ffmpeg');
 const sanitize = require('sanitize-filename');
-
 const fs = require('fs').promises;
 const path = require('path');
+const https = require('https');
+const http = require('http');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 const TEMP_DIR = path.join(__dirname, 'temp');
 const MAX_FILE_AGE_MS = 30 * 60 * 1000; // 30 minutes
 
-// Set ffmpeg path - use environment variable or auto-detect
-// On Render (Linux), ffmpeg is installed via apt and available in PATH
-// On Windows, we use the explicit path from winget installation
-if (process.platform === 'win32') {
-  const ffmpegPath = process.env.FFMPEG_PATH || 'C:\\Users\\Mihir\\AppData\\Local\\Microsoft\\WinGet\\Packages\\Gyan.FFmpeg_Microsoft.Winget.Source_8wekyb3d8bbwe\\ffmpeg-8.0.1-full_build\\bin\\ffmpeg.exe';
-  ffmpeg.setFfmpegPath(ffmpegPath);
-}
-
-
+// Cobalt API endpoint
+const COBALT_API = 'https://api.cobalt.tools/api/json';
 
 // ============================================
 // SECURITY MIDDLEWARE
@@ -43,9 +35,7 @@ app.use(helmet({
 app.use(express.json({ limit: '1kb' }));
 app.use(express.urlencoded({ extended: true, limit: '1kb' }));
 
-
-
-// Rate limiting: 20 requests per hour per IP (more generous for cloud)
+// Rate limiting: 20 requests per hour per IP
 const limiter = rateLimit({
   windowMs: 60 * 60 * 1000,
   max: 20,
@@ -55,8 +45,6 @@ const limiter = rateLimit({
 });
 
 app.use('/api/convert', limiter);
-
-
 
 // ============================================
 // UTILITY FUNCTIONS
@@ -116,11 +104,115 @@ async function cleanupOldFiles() {
   }
 }
 
+// Function to call Cobalt API
+async function getCobaltDownloadUrl(youtubeUrl) {
+  return new Promise((resolve, reject) => {
+    const postData = JSON.stringify({
+      url: youtubeUrl,
+      vCodec: "h264",
+      vQuality: "720",
+      aFormat: "mp3",
+      filenamePattern: "basic",
+      isAudioOnly: true,
+      disableMetadata: false
+    });
+
+    const options = {
+      hostname: 'api.cobalt.tools',
+      port: 443,
+      path: '/api/json',
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+        'Content-Length': Buffer.byteLength(postData)
+      }
+    };
+
+    const req = https.request(options, (res) => {
+      let data = '';
+
+      res.on('data', (chunk) => {
+        data += chunk;
+      });
+
+      res.on('end', () => {
+        try {
+          const result = JSON.parse(data);
+          console.log('Cobalt response:', result);
+
+          if (result.status === 'error') {
+            reject(new Error(result.text || 'Cobalt API error'));
+          } else if (result.status === 'redirect' || result.status === 'stream') {
+            resolve({
+              url: result.url,
+              filename: result.filename || 'audio.mp3'
+            });
+          } else if (result.url) {
+            resolve({
+              url: result.url,
+              filename: result.filename || 'audio.mp3'
+            });
+          } else {
+            reject(new Error('Unexpected response from Cobalt API'));
+          }
+        } catch (e) {
+          reject(new Error('Failed to parse Cobalt response'));
+        }
+      });
+    });
+
+    req.on('error', (e) => {
+      reject(new Error(`Cobalt API request failed: ${e.message}`));
+    });
+
+    req.write(postData);
+    req.end();
+  });
+}
+
+// Function to download file from URL
+function downloadFile(url, destPath) {
+  return new Promise((resolve, reject) => {
+    const protocol = url.startsWith('https') ? https : http;
+
+    const request = protocol.get(url, (response) => {
+      // Handle redirects
+      if (response.statusCode === 301 || response.statusCode === 302) {
+        downloadFile(response.headers.location, destPath)
+          .then(resolve)
+          .catch(reject);
+        return;
+      }
+
+      if (response.statusCode !== 200) {
+        reject(new Error(`Failed to download: ${response.statusCode}`));
+        return;
+      }
+
+      const fileStream = require('fs').createWriteStream(destPath);
+      response.pipe(fileStream);
+
+      fileStream.on('finish', () => {
+        fileStream.close();
+        resolve();
+      });
+
+      fileStream.on('error', (err) => {
+        require('fs').unlink(destPath, () => { });
+        reject(err);
+      });
+    });
+
+    request.on('error', (err) => {
+      reject(err);
+    });
+  });
+}
+
 // ============================================
 // API ENDPOINTS
 // ============================================
-
-
 
 // Health check
 app.get('/api/health', (req, res) => {
@@ -141,59 +233,31 @@ app.post('/api/convert', async (req, res) => {
     });
   }
 
-  let tempVideoPath = null;
   let tempAudioPath = null;
 
   try {
     await ensureTempDir();
 
+    console.log(`Converting audio from: ${url}`);
+
+    // Get download URL from Cobalt API
+    const cobaltResult = await getCobaltDownloadUrl(url);
+    console.log('Got Cobalt download URL:', cobaltResult.url);
+
+    // Generate temp filename
     const timestamp = Date.now();
     const randomId = Math.random().toString(36).substring(7);
-    const baseFilename = `${timestamp}-${randomId}`;
+    const safeFilename = sanitize(cobaltResult.filename || 'audio').substring(0, 100);
+    tempAudioPath = path.join(TEMP_DIR, `${timestamp}-${randomId}.mp3`);
 
-    tempVideoPath = path.join(TEMP_DIR, `${baseFilename}.webm`);
-    tempAudioPath = path.join(TEMP_DIR, `${baseFilename}.mp3`);
+    // Download the audio file
+    console.log('Downloading audio file...');
+    await downloadFile(cobaltResult.url, tempAudioPath);
+    console.log('Download complete!');
 
-    console.log(`Downloading audio from: ${url}`);
-
-    // Initialize yt-dlp wrapper
-    const ytDlpWrap = new YTDlpWrap();
-
-    // Download best audio
-    await ytDlpWrap.execPromise([
-      url,
-      '-o', tempVideoPath,
-      '-f', 'bestaudio',
-      '--no-playlist',
-      '--restrict-filenames',
-      '--no-warnings'
-    ]);
-
-    // Get video info
-    const infoOutput = await ytDlpWrap.execPromise([
-      url,
-      '--dump-single-json',
-      '--no-warnings'
-    ]);
-
-    const info = JSON.parse(infoOutput);
-    const safeTitle = sanitize(info.title || 'audio').substring(0, 100);
-
-    console.log('Converting to MP3...');
-
-    await new Promise((resolve, reject) => {
-      ffmpeg(tempVideoPath)
-        .toFormat('mp3')
-        .audioBitrate('192k')
-        .audioChannels(2)
-        .on('error', reject)
-        .on('end', resolve)
-        .save(tempAudioPath);
-    });
-
-    res.download(tempAudioPath, `${safeTitle}.mp3`, async (err) => {
+    // Send the file to user
+    res.download(tempAudioPath, `${safeFilename}.mp3`, async (err) => {
       try {
-        if (tempVideoPath) await fs.unlink(tempVideoPath).catch(() => { });
         if (tempAudioPath) await fs.unlink(tempAudioPath).catch(() => { });
       } catch (cleanupError) {
         console.error('Cleanup error:', cleanupError.message);
@@ -208,10 +272,8 @@ app.post('/api/convert', async (req, res) => {
   } catch (error) {
     console.error('Conversion error:', error.message);
     console.error('Full error:', error);
-    if (error.stderr) console.error('stderr:', error.stderr);
 
     try {
-      if (tempVideoPath) await fs.unlink(tempVideoPath).catch(() => { });
       if (tempAudioPath) await fs.unlink(tempAudioPath).catch(() => { });
     } catch { }
 
@@ -250,6 +312,7 @@ async function startServer() {
 ║  Running on port: ${PORT}                      ║
 ║                                               ║
 ║  ⚠️  FOR PERSONAL USE ONLY                    ║
+║  Using Cobalt API                             ║
 ╚═══════════════════════════════════════════════╝
     `);
   });
